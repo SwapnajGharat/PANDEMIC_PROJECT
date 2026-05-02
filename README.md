@@ -14,6 +14,5 @@ A professional Decision Support System (DSS) built to forecast pandemic trends a
 - **Streamlit** (User Interface)
 - **Folium** (Mapping)
 -
-- <img width="1919" height="940" alt="image" src="https://github.com/user-attachments/assets/33886627-e2a4-4164-80cd-0369a5d5a8f4" />
 - <img width="1909" height="942" alt="Screenshot 2026-05-02 160612" src="https://github.com/user-attachments/assets/16599346-eb9b-46e7-a4df-bc1403a960d0" />
 
