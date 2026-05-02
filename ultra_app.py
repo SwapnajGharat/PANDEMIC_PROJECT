@@ -1,142 +1,106 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from scipy.integrate import odeint
 import folium
 from streamlit_folium import st_folium
-from scipy.integrate import odeint
-import matplotlib.pyplot as plt
-from fpdf import FPDF
-from datetime import datetime
+import os
 
-# --- 1. CONFIG ---
-st.set_page_config(page_title="Pro-Grade Pandemic Analytics & Zoning", layout="wide", page_icon="🔬")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Pandemic Intelligence Dashboard", layout="wide")
 
-# --- 2. DATA ENGINE ---
-@st.cache_data
-def load_local_data():
-    try:
-        df = pd.read_csv("global_data.csv")
-    except FileNotFoundError:
-        st.error("❌ 'global_data.csv' missing in project folder.")
-        st.stop()
+# --- DATA LOADING ---
+CSV_FILE = 'global_data.csv'
 
-    df.columns = [c.lower().strip() for c in df.columns]
-    rename_map = {'day': 'date', 'cases': 'cases_total'}
-    df = df.rename(columns=rename_map)
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.sort_values(['country', 'date'])
-    
-    # Calculate daily cases and clean up
-    df['new_cases_actual'] = df.groupby('country')['cases_total'].diff().fillna(0).clip(lower=0)
-    return df
-
-full_df = load_local_data()
-countries = sorted(full_df['country'].unique())
-
-# --- 3. SIDEBAR & ZONING LOGIC ---
-with st.sidebar:
-    st.title("🔬 Research Controls")
-    selected_country = st.selectbox("Country of Interest", countries, 
-                                    index=countries.index("India") if "India" in countries else 0)
-    
-    # Filtering for the specific country and removing trailing empty rows
-    country_data = full_df[full_df['country'] == selected_country]
-    valid_data = country_data[country_data['cases_total'] > 0]
-    
-    recent_real_data = valid_data.tail(30).reset_index(drop=True)
-    latest_row = valid_data.iloc[-1]
-    
-    # 7-Day Average Calculation
-    avg_recent_cases = recent_real_data['new_cases_actual'].tail(7).mean()
-    
-    # Dynamic Zoning Logic
-    if avg_recent_cases > 5000:
-        zone_color, zone_msg, zone_hex = "Red", "🔴 CRITICAL: Total Lockdown Recommended", "#d62828"
-    elif avg_recent_cases > 1000:
-        zone_color, zone_msg, zone_hex = "Orange", "🟠 WARNING: Partial Restrictions Active", "#f77f00"
+def load_data():
+    if os.path.exists(CSV_FILE):
+        data = pd.read_csv(CSV_FILE)
+        # Ensure headers are clean (no hidden spaces)
+        data.columns = [c.strip() for c in data.columns]
+        return data
     else:
-        zone_color, zone_msg, zone_hex = "Green", "🟢 STABLE: Monitoring Mode", "#06d6a0"
+        st.error(f"Data file {CSV_FILE} not found!")
+        return pd.DataFrame(columns=['Region', 'Confirmed', 'Recovered', 'Deaths', 'Latitude', 'Longitude'])
 
-    st.success(f"**Current Status: {zone_color} Zone**")
-    st.write(zone_msg)
+df = load_data()
 
-    st.divider()
-    pop_size = st.number_input("Population (N)", value=int(valid_data['population'].iloc[0]) if 'population' in valid_data.columns else 1000000)
-    beta = st.slider("Transmission Rate (Beta)", 0.1, 1.0, 0.45)
+# --- SEIR MODEL FUNCTION ---
+def seir_model(y, t, N, beta, gamma, sigma):
+    S, E, I, R = y
+    dSdt = -beta * S * I / N
+    dEdt = beta * S * I / N - sigma * E
+    dIdt = sigma * E - gamma * I
+    dRdt = gamma * I
+    return dSdt, dEdt, dIdt, dRdt
+
+# --- ZONING LOGIC ---
+def calculate_zone(confirmed_cases):
+    if confirmed_cases > 500:
+        return "🔴 Red Zone", "#FF0000"
+    elif confirmed_cases > 100:
+        return "🟠 Orange Zone", "#FFA500"
+    else:
+        return "🟢 Green Zone", "#008000"
+
+# --- SIDEBAR: DATA MANAGEMENT ---
+st.sidebar.header("📊 Regional Data Management")
+# Using 'Region' to match your new CSV header
+selected_region = st.sidebar.selectbox("Select Region to Edit", df['Region'].unique())
+
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    add_cases = st.number_input("Add Cases", min_value=0, step=1)
+with col2:
+    remove_cases = st.number_input("Remove Cases", min_value=0, step=1)
+
+if st.sidebar.button("Update CSV Database"):
+    net_change = add_cases - remove_cases
+    # Updating 'Confirmed' to match your new CSV header
+    df.loc[df['Region'] == selected_region, 'Confirmed'] += net_change
+    df.loc[df['Confirmed'] < 0, 'Confirmed'] = 0 
     
-    st.subheader("Intervention Strategy")
-    lockdown_active = st.checkbox("Apply Policy Intervention", value=(zone_color == "Red"))
-    l_day = st.slider("Intervention Start Day", 0, 150, 40)
-    l_strict = st.slider("Policy Strictness", 0.0, 1.0, 0.8 if zone_color == "Red" else 0.4)
+    df.to_csv(CSV_FILE, index=False)
+    st.sidebar.success(f"Updated {selected_region} successfully!")
+    st.rerun()
 
-# --- 4. SEIR MATH ENGINE ---
-def run_seir(N, beta, l_day, l_strict, init_I, days=180):
-    sigma, gamma = 1/5.0, 1/10.0
-    def deriv(y, t, N, beta, sigma, gamma, l_day, l_strict):
-        S, E, I, R = y
-        eff_beta = beta * (1 - l_strict) if (lockdown_active and t > l_day) else beta
-        dSdt = -eff_beta * S * I / N
-        dEdt = eff_beta * S * I / N - sigma * E
-        dIdt = sigma * E - gamma * I
-        dRdt = gamma * I
-        return dSdt, dEdt, dIdt, dRdt
+# --- MAIN DASHBOARD UI ---
+st.title("🛡️ Pandemic Intelligence & Zoning System")
+
+# Row 1: Metrics
+total_cases = df['Confirmed'].sum()
+st.metric("Total Confirmed Cases", f"{total_cases:,}")
+
+# Row 2: Map and Model
+left_col, right_col = st.columns([2, 1])
+
+with left_col:
+    st.subheader("📍 Interactive Zoning Map")
+    m = folium.Map(location=[19.0330, 73.0297], zoom_start=12)
     
-    t = np.linspace(0, days, days)
-    init_val = max(init_I, 10)
-    y0 = N - (init_val * 3), init_val * 2, init_val, 0
-    res = odeint(deriv, y0, t, args=(N, beta, sigma, gamma, l_day, l_strict))
-    return t, res.T
-
-# --- 5. UI LAYOUT ---
-st.title(f"📍 Decision Support Dashboard: {selected_country}")
-
-c1, c2, c3 = st.columns(3)
-c1.metric("Historical Total Cases", f"{int(latest_row['cases_total']):,}")
-c2.metric("Avg. Recent Cases (7-Day)", f"{int(avg_recent_cases):,}")
-
-with c3:
-    # FIXED: Replaced unsafe_allow_value with unsafe_allow_html
-    st.markdown(
-        f"""<div style='padding:15px; border-radius:10px; background-color:{zone_hex}; color:white; text-align:center;'>
-            <span style='font-size:0.8rem; opacity:0.9;'>ZONE CLASSIFICATION</span><br>
-            <span style='font-size:1.4rem; font-weight:bold;'>{zone_color.upper()}</span>
-        </div>""", 
-        unsafe_allow_html=True
-    )
-
-st.divider()
-
-t_axis, (S, E, I, R) = run_seir(pop_size, beta, l_day, l_strict, recent_real_data['new_cases_actual'].iloc[0])
-
-tab1, tab2, tab3 = st.tabs(["📊 Forecasting & Backtesting", "🗺️ Zoning Map (Navi Mumbai)", "📄 Executive Summary"])
-
-with tab1:
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(t_axis, I, color=zone_hex, label='Model Prediction', linewidth=3)
-    real_x = np.arange(len(recent_real_data))
-    ax.scatter(real_x, recent_real_data['new_cases_actual'], color='black', label='Actual Data Points', s=30, alpha=0.5)
-    ax.set_title(f"Infection Path and Validation for {selected_country}")
-    ax.legend()
-    st.pyplot(fig)
-
-with tab2:
-    st.subheader("Regional Infrastructure Analysis")
-    m = folium.Map(location=[19.0760, 72.8777], zoom_start=11)
+    for index, row in df.iterrows():
+        status, color = calculate_zone(row['Confirmed'])
+        # Ensure your CSV has Latitude and Longitude columns!
+        if 'Latitude' in df.columns and 'Longitude' in df.columns:
+            folium.CircleMarker(
+                location=[row['Latitude'], row['Longitude']],
+                radius=10,
+                popup=f"{row['Region']}: {row['Confirmed']} cases ({status})",
+                color=color,
+                fill=True,
+                fill_color=color
+            ).add_to(m)
     
-    # Zone-colored Markers
-    folium.Marker([19.03, 73.02], popup="Navi Mumbai Center", icon=folium.Icon(color=zone_color.lower())).add_to(m)
-    folium.Marker([19.07, 72.88], popup="Emergency Hub", icon=folium.Icon(color=zone_color.lower())).add_to(m)
-    
-    if zone_color != "Green":
-        folium.Circle([19.03, 73.02], radius=5000, color=zone_hex, fill=True, fill_opacity=0.2).add_to(m)
-        
-    st_folium(m, width=1000, height=450)
+    st_folium(m, width=800, height=500)
 
-with tab3:
-    st.write("### Executive Situation Report")
-    st.write(f"This report summarizes the pandemic status for **{selected_country}** as of {latest_row['date'].strftime('%Y-%m-%d')}.")
-    st.info(f"The current 7-day average of {int(avg_recent_cases)} cases triggers **{zone_color} Zone** protocols.")
-    
-    if st.button("Generate Professional PDF"):
-        # FPDF Generation Logic
-        st.success("Report generated successfully.")
+with right_col:
+    st.subheader("📈 SEIR Prediction")
+    N = 1000000
+    t = np.linspace(0, 160, 160)
+    y0 = (N-1, 1, 0, 0)
+    res = odeint(seir_model, y0, t, args=(N, 0.3, 0.1, 0.2))
+    plot_df = pd.DataFrame(res, columns=['S', 'E', 'I', 'R'])
+    st.line_chart(plot_df[['I', 'E']])
+
+# Row 3: Data Table
+st.subheader("📋 Regional Statistics")
+st.dataframe(df[['Region', 'Confirmed', 'Recovered', 'Deaths']], use_container_width=True)
