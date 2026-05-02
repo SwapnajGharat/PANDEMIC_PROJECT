@@ -28,7 +28,7 @@ A professional **Decision Support System (DSS)** built to forecast pandemic tren
 
 
 <img width="1909" height="870" alt="Screenshot 2026-05-02 181328" src="https://github.com/user-attachments/assets/df049c19-3462-41e4-b7a5-d5b72446e457" />
-
+---
 <img width="1909" height="849" alt="Screenshot 2026-05-02 181345" src="https://github.com/user-attachments/assets/230560b0-a518-49dd-94c0-9cffce9f85ff" />
 
 
