@@ -23,6 +23,7 @@ Mapping: Folium
 Modeling: SEIR Framework (Susceptible-Exposed-Infectious-Recovered)
 
 📈 System Preview
+
 <img width="1909" height="870" alt="Screenshot 2026-05-02 181328" src="https://github.com/user-attachments/assets/e8fa96cf-68c0-4a8a-b4e1-5f8207e56432" />
 <img width="1909" height="849" alt="Screenshot 2026-05-02 181345" src="https://github.com/user-attachments/assets/1acf9a8f-2597-42b7-bf35-4930b8433972" />
 
